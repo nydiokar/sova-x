@@ -13,6 +13,7 @@
     "test:render": "node dist/scripts/test-render.js",
     "test:live-render": "node dist/scripts/test-live-render.js",
     "test:parse": "node dist/scripts/test-parse-parent.js",
+    "worker:mentions": "node dist/scripts/mention-worker.js",
     "test:x:mentions": "node dist/scripts/test-x-mentions.js",
     "test:x:oauth1-me": "node dist/scripts/test-x-oauth1-me.js",
     "test:x:oauth2-start": "node dist/scripts/test-x-oauth2-start.js",

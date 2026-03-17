@@ -35,28 +35,28 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
 
 ## Vector 2: Mention Polling Production Path
 
-- Replace the current mention test script with a real polling worker/service.
-- Persist `last_seen_mention_id` durably.
-- Poll `GET /2/users/:id/mentions` using `since_id`.
-- Keep author expansions and username fields in the mentions request.
-- Filter returned mentions locally to `X_ALLOWED_CALLER_IDS`.
-- Ignore self-mentions unless they are intentionally allowed.
-- Parse exactly one mint from mention text.
-- Reply to the trigger tweet itself.
-- Persist processed mention state.
+- Done: replace the current mention test script with a real polling worker/service.
+- Done: persist `last_seen_mention_id` durably.
+- Done: poll `GET /2/users/:id/mentions` using `since_id`.
+- Done: keep author expansions and username fields in the mentions request.
+- Done: filter returned mentions locally to `X_ALLOWED_CALLER_IDS`.
+- Done: ignore self-mentions unless they are intentionally allowed.
+- Done: parse exactly one mint from mention text.
+- Done: reply to the trigger tweet itself.
+- Done: persist processed mention state.
 - Persist ignored reasons:
-  - unauthorized author
-  - invalid mint
-  - duplicate
-  - self-mention
-- Persist failure reasons for reply or analysis failures.
+  - Done: unauthorized author
+  - Done: invalid mint
+  - Done: duplicate
+  - Done: self-mention
+- Done: persist failure reasons for reply or analysis failures.
 - Add safe retry/backoff for transient X or analyzer failures.
 - Add a hard kill switch to stop polling without code changes.
 - Add a dry-run mode that reads and classifies mentions without replying.
 
 ## Vector 3: Shared Bot Pipeline
 
-- Keep one shared pipeline for:
+- Done: keep one shared pipeline for:
   - trigger validation
   - mint validation
   - Intel call
@@ -64,7 +64,7 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
   - summary text generation
   - image render
   - reply post
-- Keep one shared posting service for reply creation and media upload.
+- Done: keep one shared posting service for reply creation and media upload.
 - Keep one shared persistence model for:
   - trigger mode
   - trigger tweet ID
@@ -72,7 +72,7 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
   - status
   - posted reply ID
   - error details
-- Keep one shared dedupe/idempotency layer.
+- Done: keep one shared dedupe/idempotency layer.
 - Add structured logs with:
   - run ID
   - mode
@@ -94,8 +94,8 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
 
 ## Vector 5: Operational Protections
 
-- Add a global disable flag for posting.
-- Add a preview-only mode for production safety.
+- Done: add a global disable flag for posting.
+- Done: add a preview-only mode for production safety.
 - Add replay tooling for:
   - one mention trigger
   - one manual trigger run
@@ -115,6 +115,9 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
 
 - 2026-03-17: Step 1 completed in `sova-x` with a reusable auth-gated manual route, configurable host/base path, and enforced preview-confirm posting.
 - 2026-03-17: Step 2 completed for manual mode with durable run persistence, duplicate checks, basic run history, failed-run retry, and text-only post fallback.
+- 2026-03-17: Step 3 partially completed with shared reply-content generation and a shared reply-posting service reused by both manual and mention flows.
+- 2026-03-17: Step 4 started with a real polling worker, durable `last_seen_mention_id`, persisted mention outcomes, and shared target-tweet-plus-mint dedupe across manual and mention flows.
+- 2026-03-17: Step 5 started with env-driven posting disable, preview-only mode, and mention dry-run mode wired into the live worker and manual posting path.
 
 ## Explicit Non-Goals For This Backlog
 

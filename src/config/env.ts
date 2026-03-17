@@ -29,6 +29,9 @@ export type SovaXEnv = {
   manualBasePath: string;
   manualAllowedUserIds: string[];
   manualAllowedUserEmails: string[];
+  disablePosting: boolean;
+  previewOnlyMode: boolean;
+  mentionDryRunMode: boolean;
 };
 
 function parseInteger(name: string, fallback: number): number {
@@ -54,6 +57,23 @@ function parseCsv(value: string | undefined): string[] {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function parseBoolean(name: string, fallback = false): boolean {
+  const raw: string | undefined = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+
+  const normalized: string = raw.trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+    return true;
+  }
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
+    return false;
+  }
+
+  throw new Error(`Invalid boolean for ${name}: ${raw}`);
 }
 
 export function loadEnv(): SovaXEnv {
@@ -82,6 +102,9 @@ export function loadEnv(): SovaXEnv {
     manualBasePath: process.env.SOVA_X_MANUAL_BASE_PATH ?? '/manual-trigger',
     manualAllowedUserIds: parseCsv(process.env.SOVA_X_MANUAL_ALLOWED_USER_IDS),
     manualAllowedUserEmails: parseCsv(process.env.SOVA_X_MANUAL_ALLOWED_USER_EMAILS).map((email) => email.toLowerCase()),
+    disablePosting: parseBoolean('SOVA_X_DISABLE_POSTING', false),
+    previewOnlyMode: parseBoolean('SOVA_X_PREVIEW_ONLY', false),
+    mentionDryRunMode: parseBoolean('SOVA_X_MENTION_DRY_RUN', false),
   };
 }
 

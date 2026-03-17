@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { processTrigger } from '../app/process-trigger';
+import { DedupeStore } from '../core/dedupe-store';
 import { parseXPostUrl } from '../core/x-post-url';
 import { loadEnv, type SovaXEnv } from '../config/env';
 import { SdkIntelClient } from '../intel/client';
@@ -42,6 +43,7 @@ const previewRuns: Map<string, PreviewRun> = new Map();
 export function createManualTriggerRequestHandler(env: SovaXEnv = loadEnv()) {
   const basePath: string = normalizeBasePath(env.manualBasePath);
   const runStore = new ManualRunStore(env.outputDir);
+  const dedupeStore = new DedupeStore(env.outputDir);
 
   return async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const method: string = req.method ?? 'GET';
@@ -108,6 +110,7 @@ export function createManualTriggerRequestHandler(env: SovaXEnv = loadEnv()) {
         const result = await runTrigger({
           env,
           runStore,
+          dedupeStore,
           tweetUrl: expectString(body.tweetUrl, 'tweetUrl'),
           mint: expectString(body.mint, 'mint'),
           mode: body.mode === 'post' ? 'post' : 'preview',
@@ -145,6 +148,7 @@ export function createManualTriggerRequestHandler(env: SovaXEnv = loadEnv()) {
 async function runTrigger(params: {
   env: SovaXEnv;
   runStore: ManualRunStore;
+  dedupeStore: DedupeStore;
   tweetUrl: string;
   mint: string;
   mode: 'preview' | 'post';
@@ -157,6 +161,14 @@ async function runTrigger(params: {
   }
 
   if (params.mode === 'post') {
+    if (params.env.disablePosting) {
+      throw new Error('Posting is globally disabled by SOVA_X_DISABLE_POSTING.');
+    }
+
+    if (params.env.previewOnlyMode) {
+      throw new Error('Posting is disabled while SOVA_X_PREVIEW_ONLY is enabled.');
+    }
+
     if (!params.confirmPost) {
       throw new Error('Posting requires explicit confirmation after preview.');
     }
@@ -247,6 +259,10 @@ async function runTrigger(params: {
     mint: triggerResult.mint,
     replyText: triggerResult.replyText,
   });
+  const dedupeClaimed = await params.dedupeStore.claimTargetMint(triggerResult.tweetId, triggerResult.mint, runId);
+  if (!dedupeClaimed) {
+    throw new Error('A manual run for this target tweet and mint already exists.');
+  }
 
   previewRuns.set(previewToken, {
     runId,
@@ -295,6 +311,14 @@ async function retryFailedRun(params: {
 
   if (storedRun.status !== 'failed') {
     throw new Error('Only failed manual runs can be retried.');
+  }
+
+  if (params.env.disablePosting) {
+    throw new Error('Posting is globally disabled by SOVA_X_DISABLE_POSTING.');
+  }
+
+  if (params.env.previewOnlyMode) {
+    throw new Error('Posting is disabled while SOVA_X_PREVIEW_ONLY is enabled.');
   }
 
   if (!storedRun.previewImagePath) {
