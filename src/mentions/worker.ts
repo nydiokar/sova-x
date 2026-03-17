@@ -1,5 +1,7 @@
 import { processMention } from '../app/process-mention';
 import { DedupeStore } from '../core/dedupe-store';
+import { logEvent } from '../core/logger';
+import { MetricsStore } from '../core/metrics-store';
 import type { SovaXEnv } from '../config/env';
 import { SdkIntelClient } from '../intel/client';
 import { DexscreenerTokenMetadataClient } from '../metadata/client';
@@ -12,6 +14,7 @@ import { XClient } from '../x/x-client';
 export class MentionWorker {
   private readonly store: MentionStore;
   private readonly dedupeStore: DedupeStore;
+  private readonly metricsStore: MetricsStore;
   private readonly readClient: XClient;
   private readonly intelClient: SdkIntelClient;
   private readonly metadataClient: DexscreenerTokenMetadataClient;
@@ -27,6 +30,7 @@ export class MentionWorker {
 
     this.store = new MentionStore(env.outputDir);
     this.dedupeStore = new DedupeStore(env.outputDir);
+    this.metricsStore = new MetricsStore(env.outputDir);
     this.readClient = new XClient(env.xApiBaseUrl, { kind: 'bearer', token: env.xBearerToken });
     this.intelClient = new SdkIntelClient({
       baseUrl: env.sovaIntelBaseUrl,
@@ -54,6 +58,12 @@ export class MentionWorker {
     if (mentions.length === 0) {
       return;
     }
+    await this.metricsStore.increment('mentionsRead', mentions.length);
+    logEvent('mentions.poll.completed', {
+      mode: 'mention',
+      fetchedCount: mentions.length,
+      sinceId,
+    });
 
     const sortedMentions = [...mentions].sort(compareTweetIdsAscending);
     for (const mention of sortedMentions) {
@@ -72,6 +82,7 @@ export class MentionWorker {
     }
 
     if (mention.authorId === this.env.xBotUserId && !this.env.xAllowedCallerIds.includes(mention.authorId)) {
+      await this.metricsStore.increment('mentionsIgnored');
       await this.store.createMention({
         mentionId: mention.id,
         targetTweetId: mention.id,
@@ -81,10 +92,17 @@ export class MentionWorker {
         status: 'ignored',
         reason: 'self-mention',
       });
+      logEvent('mention.ignored', {
+        mentionId: mention.id,
+        mode: 'mention',
+        reason: 'self-mention',
+        triggerTweetId: mention.id,
+      });
       return;
     }
 
     if (!this.env.xAllowedCallerIds.includes(mention.authorId)) {
+      await this.metricsStore.increment('mentionsIgnored');
       await this.store.createMention({
         mentionId: mention.id,
         targetTweetId: mention.id,
@@ -94,9 +112,16 @@ export class MentionWorker {
         status: 'ignored',
         reason: 'unauthorized author',
       });
+      logEvent('mention.ignored', {
+        mentionId: mention.id,
+        mode: 'mention',
+        reason: 'unauthorized author',
+        triggerTweetId: mention.id,
+      });
       return;
     }
 
+    await this.metricsStore.increment('validOperatorTriggers');
     const processed = await processMention({
       mention,
       intelClient: this.intelClient,
@@ -105,6 +130,7 @@ export class MentionWorker {
     });
 
     if (processed.status !== 'ready') {
+      await this.metricsStore.increment('mentionsIgnored');
       await this.store.createMention({
         mentionId: mention.id,
         targetTweetId: mention.id,
@@ -114,11 +140,18 @@ export class MentionWorker {
         status: 'ignored',
         reason: 'invalid mint',
       });
+      logEvent('mention.ignored', {
+        mentionId: mention.id,
+        mode: 'mention',
+        reason: 'invalid mint',
+        triggerTweetId: mention.id,
+      });
       return;
     }
 
     const dedupeClaimed = await this.dedupeStore.claimTargetMint(mention.id, processed.mint, mention.id);
     if (!dedupeClaimed) {
+      await this.metricsStore.increment('mentionsIgnored');
       await this.store.createMention({
         mentionId: mention.id,
         targetTweetId: mention.id,
@@ -128,10 +161,18 @@ export class MentionWorker {
         status: 'ignored',
         reason: 'duplicate',
       });
+      logEvent('mention.ignored', {
+        mentionId: mention.id,
+        mode: 'mention',
+        mint: processed.mint,
+        reason: 'duplicate',
+        triggerTweetId: mention.id,
+      });
       return;
     }
 
     if (this.env.disablePosting) {
+      await this.metricsStore.increment('mentionsIgnored');
       await this.store.createMention({
         mentionId: mention.id,
         targetTweetId: mention.id,
@@ -141,10 +182,18 @@ export class MentionWorker {
         status: 'ignored',
         reason: 'posting disabled',
       });
+      logEvent('mention.ignored', {
+        mentionId: mention.id,
+        mode: 'mention',
+        mint: processed.mint,
+        reason: 'posting disabled',
+        triggerTweetId: mention.id,
+      });
       return;
     }
 
     if (this.env.previewOnlyMode) {
+      await this.metricsStore.increment('mentionsIgnored');
       await this.store.createMention({
         mentionId: mention.id,
         targetTweetId: mention.id,
@@ -154,10 +203,18 @@ export class MentionWorker {
         status: 'ignored',
         reason: 'preview-only mode',
       });
+      logEvent('mention.ignored', {
+        mentionId: mention.id,
+        mode: 'mention',
+        mint: processed.mint,
+        reason: 'preview-only mode',
+        triggerTweetId: mention.id,
+      });
       return;
     }
 
     if (this.env.mentionDryRunMode) {
+      await this.metricsStore.increment('mentionsIgnored');
       await this.store.createMention({
         mentionId: mention.id,
         targetTweetId: mention.id,
@@ -167,10 +224,23 @@ export class MentionWorker {
         status: 'ignored',
         reason: 'dry-run mode',
       });
+      logEvent('mention.ignored', {
+        mentionId: mention.id,
+        mode: 'mention',
+        mint: processed.mint,
+        reason: 'dry-run mode',
+        triggerTweetId: mention.id,
+      });
       return;
     }
 
     try {
+      logEvent('mention.post.started', {
+        mentionId: mention.id,
+        mode: 'mention',
+        mint: processed.mint,
+        triggerTweetId: mention.id,
+      });
       const png: Buffer = await renderSvgToPngBuffer(processed.socialCardSvg);
       const posted = await postReply({
         env: this.env,
@@ -188,6 +258,15 @@ export class MentionWorker {
         reason: posted.usedTextOnlyFallback ? 'text-only fallback' : null,
         replyTweetId: posted.postedReplyId,
       });
+      await this.metricsStore.increment('repliesPosted');
+      logEvent('mention.post.completed', {
+        mentionId: mention.id,
+        mode: 'mention',
+        mint: processed.mint,
+        triggerTweetId: mention.id,
+        replyTweetId: posted.postedReplyId,
+        usedTextOnlyFallback: posted.usedTextOnlyFallback,
+      });
     } catch (error: unknown) {
       await this.store.createMention({
         mentionId: mention.id,
@@ -197,6 +276,13 @@ export class MentionWorker {
         mint: processed.mint,
         status: 'failed',
         reason: toErrorMessage(error),
+      });
+      logEvent('mention.post.failed', {
+        mentionId: mention.id,
+        mode: 'mention',
+        mint: processed.mint,
+        triggerTweetId: mention.id,
+        error: toErrorMessage(error),
       });
     }
   }

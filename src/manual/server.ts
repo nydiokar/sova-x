@@ -4,6 +4,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { processTrigger } from '../app/process-trigger';
 import { DedupeStore } from '../core/dedupe-store';
+import { logEvent } from '../core/logger';
+import { MetricsStore } from '../core/metrics-store';
 import { parseXPostUrl } from '../core/x-post-url';
 import { loadEnv, type SovaXEnv } from '../config/env';
 import { SdkIntelClient } from '../intel/client';
@@ -44,6 +46,7 @@ export function createManualTriggerRequestHandler(env: SovaXEnv = loadEnv()) {
   const basePath: string = normalizeBasePath(env.manualBasePath);
   const runStore = new ManualRunStore(env.outputDir);
   const dedupeStore = new DedupeStore(env.outputDir);
+  const metricsStore = new MetricsStore(env.outputDir);
 
   return async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const method: string = req.method ?? 'GET';
@@ -111,6 +114,7 @@ export function createManualTriggerRequestHandler(env: SovaXEnv = loadEnv()) {
           env,
           runStore,
           dedupeStore,
+          metricsStore,
           tweetUrl: expectString(body.tweetUrl, 'tweetUrl'),
           mint: expectString(body.mint, 'mint'),
           mode: body.mode === 'post' ? 'post' : 'preview',
@@ -149,6 +153,7 @@ async function runTrigger(params: {
   env: SovaXEnv;
   runStore: ManualRunStore;
   dedupeStore: DedupeStore;
+  metricsStore: MetricsStore;
   tweetUrl: string;
   mint: string;
   mode: 'preview' | 'post';
@@ -193,6 +198,12 @@ async function runTrigger(params: {
     }
 
     await params.runStore.markPosting(storedRun.runId);
+    logEvent('manual.post.started', {
+      runId: storedRun.runId,
+      mode: 'manual',
+      mint: storedRun.mint,
+      triggerTweetId: storedRun.targetTweetId,
+    });
 
     let postResult: PostReplyResult;
     try {
@@ -209,6 +220,15 @@ async function runTrigger(params: {
     }
 
     await params.runStore.markPosted(storedRun.runId, postResult.postedReplyId);
+    await params.metricsStore.increment('repliesPosted');
+    logEvent('manual.post.completed', {
+      runId: storedRun.runId,
+      mode: 'manual',
+      mint: storedRun.mint,
+      triggerTweetId: storedRun.targetTweetId,
+      replyTweetId: postResult.postedReplyId,
+      usedTextOnlyFallback: postResult.usedTextOnlyFallback,
+    });
 
     return {
       runId: storedRun.runId,
@@ -242,6 +262,11 @@ async function runTrigger(params: {
   }
 
   if (await params.runStore.hasDuplicateTargetMint(triggerResult.tweetId, triggerResult.mint)) {
+    logEvent('manual.preview.duplicate', {
+      mode: 'manual',
+      mint: triggerResult.mint,
+      triggerTweetId: triggerResult.tweetId,
+    });
     throw new Error('A manual run for this target tweet and mint already exists.');
   }
 
@@ -261,6 +286,11 @@ async function runTrigger(params: {
   });
   const dedupeClaimed = await params.dedupeStore.claimTargetMint(triggerResult.tweetId, triggerResult.mint, runId);
   if (!dedupeClaimed) {
+    logEvent('manual.preview.duplicate', {
+      mode: 'manual',
+      mint: triggerResult.mint,
+      triggerTweetId: triggerResult.tweetId,
+    });
     throw new Error('A manual run for this target tweet and mint already exists.');
   }
 
@@ -283,6 +313,13 @@ async function runTrigger(params: {
     previewToken,
     previewImagePath,
     outputJsonPath,
+  });
+  await params.metricsStore.increment('validOperatorTriggers');
+  logEvent('manual.preview.created', {
+    runId,
+    mode: 'manual',
+    mint: triggerResult.mint,
+    triggerTweetId: triggerResult.tweetId,
   });
 
   return {
@@ -326,6 +363,12 @@ async function retryFailedRun(params: {
   }
 
   await params.runStore.markPosting(storedRun.runId);
+  logEvent('manual.retry.started', {
+    runId: storedRun.runId,
+    mode: 'manual',
+    mint: storedRun.mint,
+    triggerTweetId: storedRun.targetTweetId,
+  });
 
   let postResult: PostReplyResult;
   try {
@@ -343,6 +386,15 @@ async function retryFailedRun(params: {
   }
 
   await params.runStore.markPosted(storedRun.runId, postResult.postedReplyId);
+  await new MetricsStore(params.env.outputDir).increment('repliesPosted');
+  logEvent('manual.retry.completed', {
+    runId: storedRun.runId,
+    mode: 'manual',
+    mint: storedRun.mint,
+    triggerTweetId: storedRun.targetTweetId,
+    replyTweetId: postResult.postedReplyId,
+    usedTextOnlyFallback: postResult.usedTextOnlyFallback,
+  });
 
   return {
     runId: storedRun.runId,

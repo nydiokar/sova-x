@@ -74,21 +74,21 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
   - error details
 - Done: keep one shared dedupe/idempotency layer.
 - Add structured logs with:
-  - run ID
-  - mode
-  - mint
-  - trigger tweet ID
-  - reply tweet ID
+  - Done: run ID
+  - Done: mode
+  - Done: mint
+  - Done: trigger tweet ID
+  - Done: reply tweet ID
 
 ## Vector 4: Cost And Safety Controls
 
-- Expose counts for:
+- Done: expose counts for:
   - mentions read
   - mentions ignored
   - valid operator triggers
   - replies posted
 - Add a visible config note or admin surface documenting the X spend cap requirement.
-- Stop work before the Intel call for unauthorized mentions.
+- Done: stop work before the Intel call for unauthorized mentions.
 - Keep parent-tweet reads disabled unless a real product need appears.
 - Add alerting/logging when mention volume jumps unexpectedly.
 
@@ -118,6 +118,7 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
 - 2026-03-17: Step 3 partially completed with shared reply-content generation and a shared reply-posting service reused by both manual and mention flows.
 - 2026-03-17: Step 4 started with a real polling worker, durable `last_seen_mention_id`, persisted mention outcomes, and shared target-tweet-plus-mint dedupe across manual and mention flows.
 - 2026-03-17: Step 5 started with env-driven posting disable, preview-only mode, and mention dry-run mode wired into the live worker and manual posting path.
+- 2026-03-17: Step 6 started with file-backed counters and structured event logging across manual and mention flows.
 
 ## Explicit Non-Goals For This Backlog
 
