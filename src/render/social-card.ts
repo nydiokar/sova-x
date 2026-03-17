@@ -2,6 +2,18 @@ import type { HolderDistributionSummary } from '../core/summary';
 import { formatUtcTimestamp } from '../core/summary';
 import { SOVA_BADGE_SVG } from '../assets/sova-badge';
 
+export async function fetchImageAsDataUri(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const contentType = response.headers.get('content-type') ?? 'image/png';
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return `data:${contentType};base64,${buffer.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
+
 function escapeXml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -22,7 +34,7 @@ function formatAxisValue(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
-export function renderSocialCardSvg(summary: HolderDistributionSummary): string {
+export function renderSocialCardSvg(summary: HolderDistributionSummary, tokenImageDataUri?: string | null): string {
   const width: number = 1200;
   const height: number = 675;
   const padding: number = 56;
@@ -76,11 +88,13 @@ export function renderSocialCardSvg(summary: HolderDistributionSummary): string 
   });
 
   // Token icon with proper clipPath for librsvg compatibility
+  // Use pre-fetched data URI so sharp/librsvg can render the image (it cannot fetch external URLs)
   const clipId = 'token-icon-clip';
-  const iconMarkup: string = summary.tokenImageUrl
+  const resolvedImageUri = tokenImageDataUri ?? null;
+  const iconMarkup: string = resolvedImageUri
     ? `<defs><clipPath id="${clipId}"><circle cx="${iconCx}" cy="${iconCy}" r="${iconR}" /></clipPath></defs>
        <circle cx="${iconCx}" cy="${iconCy}" r="${iconR}" fill="#0f1729" stroke="#2a3552" stroke-width="2" />
-       <image href="${escapeXml(summary.tokenImageUrl)}" x="${iconCx - iconR}" y="${iconCy - iconR}" width="${iconR * 2}" height="${iconR * 2}" clip-path="url(#${clipId})" />`
+       <image href="${escapeXml(resolvedImageUri)}" x="${iconCx - iconR}" y="${iconCy - iconR}" width="${iconR * 2}" height="${iconR * 2}" clip-path="url(#${clipId})" />`
     : `<circle cx="${iconCx}" cy="${iconCy}" r="${iconR}" fill="#1f2b46" />
        <text x="${iconCx}" y="${iconCy + 8}" text-anchor="middle" fill="#f4f7ff" font-size="18" font-weight="700" font-family="Segoe UI, Arial, sans-serif">${escapeXml(summary.tokenSymbol.slice(0, 3).toUpperCase())}</text>`;
 
@@ -88,7 +102,7 @@ export function renderSocialCardSvg(summary: HolderDistributionSummary): string 
   const badgeSize: number = 34;
   const brandTextX: number = innerRight;
   const brandTextY: number = iconCy + 8;
-  const badgeX: number = brandTextX - 134;
+  const badgeX: number = brandTextX - 164;
   const badgeY: number = iconCy - badgeSize / 2;
 
   return `<?xml version="1.0" encoding="UTF-8"?>

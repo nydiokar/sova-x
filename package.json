@@ -1,6 +1,6 @@
 {
   "name": "sova-x",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Standalone X bot for Sova Intel holder-profile replies",
   "type": "commonjs",

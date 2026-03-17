@@ -5,7 +5,7 @@ import { buildHolderDistributionSummary, buildReplyText } from '../core/summary'
 import { SdkIntelClient } from '../intel/client';
 import { DexscreenerTokenMetadataClient } from '../metadata/client';
 import { renderSvgToPngBuffer } from '../render/png';
-import { renderSocialCardSvg } from '../render/social-card';
+import { fetchImageAsDataUri, renderSocialCardSvg } from '../render/social-card';
 
 async function main(): Promise<void> {
   const env = loadEnv();
@@ -34,7 +34,10 @@ async function main(): Promise<void> {
 
   const summary = buildHolderDistributionSummary(result, metadata, env.defaultTopN);
   const replyText = buildReplyText(summary);
-  const svg = renderSocialCardSvg(summary);
+  const tokenImageDataUri = summary.tokenImageUrl
+    ? await fetchImageAsDataUri(summary.tokenImageUrl)
+    : null;
+  const svg = renderSocialCardSvg(summary, tokenImageDataUri);
   const png = await renderSvgToPngBuffer(svg);
 
   await fs.mkdir(env.outputDir, { recursive: true });

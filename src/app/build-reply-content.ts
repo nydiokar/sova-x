@@ -1,7 +1,7 @@
 import { buildHolderDistributionSummary, buildReplyText } from '../core/summary';
 import type { IntelClient } from '../intel/client';
 import type { TokenMetadataClient } from '../metadata/client';
-import { renderSocialCardSvg } from '../render/social-card';
+import { fetchImageAsDataUri, renderSocialCardSvg } from '../render/social-card';
 
 export type ReplyContent = {
   mint: string;
@@ -21,9 +21,12 @@ export async function buildReplyContent(params: {
   ]);
 
   const summary = buildHolderDistributionSummary(result, metadata, params.topN);
+  const tokenImageDataUri = summary.tokenImageUrl
+    ? await fetchImageAsDataUri(summary.tokenImageUrl)
+    : null;
   return {
     mint: params.mint,
     replyText: buildReplyText(summary),
-    socialCardSvg: renderSocialCardSvg(summary),
+    socialCardSvg: renderSocialCardSvg(summary, tokenImageDataUri),
   };
 }
