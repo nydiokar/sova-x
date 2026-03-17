@@ -1,6 +1,5 @@
 import { extractSingleMintFromMention } from '../core/solana';
-import { buildHolderDistributionSummary, buildReplyText } from '../core/summary';
-import { renderSocialCardSvg } from '../render/social-card';
+import { buildReplyContent } from './build-reply-content';
 import type { IntelClient } from '../intel/client';
 import type { TokenMetadataClient } from '../metadata/client';
 import type { XMention } from '../types/x';
@@ -25,16 +24,16 @@ export async function processMention(params: {
     return { status: 'ignored', reason: 'Mention did not contain exactly one mint candidate.' };
   }
 
-  const [result, metadata] = await Promise.all([
-    params.intelClient.pollHolderProfiles(mint, params.topN),
-    params.metadataClient.getTokenMetadata(mint),
-  ]);
-
-  const summary = buildHolderDistributionSummary(result, metadata, params.topN);
+  const reply = await buildReplyContent({
+    mint,
+    intelClient: params.intelClient,
+    metadataClient: params.metadataClient,
+    topN: params.topN,
+  });
   return {
     status: 'ready',
-    mint,
-    replyText: buildReplyText(summary),
-    socialCardSvg: renderSocialCardSvg(summary),
+    mint: reply.mint,
+    replyText: reply.replyText,
+    socialCardSvg: reply.socialCardSvg,
   };
 }

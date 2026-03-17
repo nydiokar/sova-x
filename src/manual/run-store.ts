@@ -41,6 +41,11 @@ export class ManualRunStore {
     return state.runs.find((run) => run.previewToken === previewToken) ?? null;
   }
 
+  async findByRunId(runId: string): Promise<ManualRunRecord | null> {
+    const state = await this.readState();
+    return state.runs.find((run) => run.runId === runId) ?? null;
+  }
+
   async hasDuplicateTargetMint(targetTweetId: string, mint: string): Promise<boolean> {
     const state = await this.readState();
     return state.runs.some((run) =>

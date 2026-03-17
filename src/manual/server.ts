@@ -3,13 +3,12 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { processTrigger } from '../app/process-trigger';
+import { parseXPostUrl } from '../core/x-post-url';
 import { loadEnv, type SovaXEnv } from '../config/env';
 import { SdkIntelClient } from '../intel/client';
 import { DexscreenerTokenMetadataClient } from '../metadata/client';
 import { renderSvgToPngBuffer } from '../render/png';
-import { parseXPostUrl } from '../core/x-post-url';
-import { XMediaClient } from '../x/media-client';
-import { XClient } from '../x/x-client';
+import { postReply, type PostReplyResult } from '../x/reply-poster';
 import { isManualViewerAllowed, resolveManualViewer } from './auth';
 import { ManualRunStore } from './run-store';
 
@@ -24,6 +23,7 @@ type TriggerResponse = {
   outputJsonPath: string;
   previewToken?: string;
   postedReplyId?: string;
+  usedTextOnlyFallback?: boolean;
 };
 
 type PreviewRun = {
@@ -74,13 +74,25 @@ export function createManualTriggerRequestHandler(env: SovaXEnv = loadEnv()) {
     if (method === 'GET' && pathname.startsWith(`${basePath}/preview/`)) {
       const runId: string = path.basename(pathname, '.png');
       const run = findPreviewRunByRunId(runId);
-      if (!run) {
+      if (run) {
+        res.writeHead(200, { 'Content-Type': 'image/png' });
+        res.end(run.png);
+        return;
+      }
+
+      const storedRun = await runStore.findByRunId(runId);
+      if (!storedRun?.previewImagePath) {
         respondText(res, 404, 'Preview not found.');
         return;
       }
 
-      res.writeHead(200, { 'Content-Type': 'image/png' });
-      res.end(run.png);
+      try {
+        const png: Buffer = await fs.readFile(storedRun.previewImagePath);
+        res.writeHead(200, { 'Content-Type': 'image/png' });
+        res.end(png);
+      } catch {
+        respondText(res, 404, 'Preview not found.');
+      }
       return;
     }
 
@@ -105,8 +117,23 @@ export function createManualTriggerRequestHandler(env: SovaXEnv = loadEnv()) {
         });
         respondJson(res, 200, result);
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        respondJson(res, 400, { error: message });
+        respondJson(res, 400, { error: toErrorMessage(error) });
+      }
+      return;
+    }
+
+    if (method === 'POST' && pathname.startsWith(`${basePath}/api/runs/`) && pathname.endsWith('/retry')) {
+      try {
+        const runId: string = pathname.slice(`${basePath}/api/runs/`.length, -('/retry'.length));
+        const result = await retryFailedRun({
+          env,
+          runStore,
+          runId,
+          basePath,
+        });
+        respondJson(res, 200, result);
+      } catch (error: unknown) {
+        respondJson(res, 400, { error: toErrorMessage(error) });
       }
       return;
     }
@@ -155,9 +182,9 @@ async function runTrigger(params: {
 
     await params.runStore.markPosting(storedRun.runId);
 
-    let postedReplyId: string;
+    let postResult: PostReplyResult;
     try {
-      postedReplyId = await postReply({
+      postResult = await postReply({
         env: params.env,
         replyText: previewRun.replyText,
         replyToTweetId: previewRun.tweetId,
@@ -169,7 +196,7 @@ async function runTrigger(params: {
       throw error;
     }
 
-    await params.runStore.markPosted(storedRun.runId, postedReplyId);
+    await params.runStore.markPosted(storedRun.runId, postResult.postedReplyId);
 
     return {
       runId: storedRun.runId,
@@ -180,7 +207,8 @@ async function runTrigger(params: {
       replyText: storedRun.replyText,
       previewImageUrl: `${params.basePath}/preview/${storedRun.runId}.png`,
       outputJsonPath: storedRun.outputJsonPath ?? '',
-      postedReplyId,
+      postedReplyId: postResult.postedReplyId,
+      usedTextOnlyFallback: postResult.usedTextOnlyFallback,
     };
   }
 
@@ -254,52 +282,56 @@ async function runTrigger(params: {
   };
 }
 
-async function postReply(params: {
+async function retryFailedRun(params: {
   env: SovaXEnv;
-  replyText: string;
-  replyToTweetId: string;
-  png: Buffer;
-}): Promise<string> {
-  const auth = buildPostAuth(params.env);
-  const xClient = new XClient(params.env.xApiBaseUrl, auth);
-  const mediaClient = new XMediaClient(params.env.xApiBaseUrl, auth);
-  const uploaded = await mediaClient.uploadPng(params.png);
-  const post = await xClient.createPost({
-    text: params.replyText,
-    replyToTweetId: params.replyToTweetId,
-    mediaIds: [uploaded.mediaId],
-  });
-  return post.id;
-}
-
-function buildPostAuth(env: SovaXEnv):
-  | { kind: 'bearer'; token: string }
-  | {
-      kind: 'oauth1';
-      credentials: {
-        consumerKey: string;
-        consumerSecret: string;
-        accessToken: string;
-        accessTokenSecret: string;
-      };
-    } {
-  if (env.xConsumerKey && env.xConsumerSecret && env.xAccessToken && env.xAccessTokenSecret) {
-    return {
-      kind: 'oauth1',
-      credentials: {
-        consumerKey: env.xConsumerKey,
-        consumerSecret: env.xConsumerSecret,
-        accessToken: env.xAccessToken,
-        accessTokenSecret: env.xAccessTokenSecret,
-      },
-    };
+  runStore: ManualRunStore;
+  runId: string;
+  basePath: string;
+}): Promise<TriggerResponse> {
+  const storedRun = await params.runStore.findByRunId(params.runId);
+  if (!storedRun) {
+    throw new Error('Manual run not found.');
   }
 
-  if (env.xOAuth2AccessToken) {
-    return { kind: 'bearer', token: env.xOAuth2AccessToken };
+  if (storedRun.status !== 'failed') {
+    throw new Error('Only failed manual runs can be retried.');
   }
 
-  throw new Error('Posting requires X_OAUTH2_ACCESS_TOKEN or the OAuth 1.0a credential set in sova-x/.env');
+  if (!storedRun.previewImagePath) {
+    throw new Error('Retry requires a persisted preview image.');
+  }
+
+  await params.runStore.markPosting(storedRun.runId);
+
+  let postResult: PostReplyResult;
+  try {
+    const png: Buffer = await fs.readFile(storedRun.previewImagePath);
+    postResult = await postReply({
+      env: params.env,
+      replyText: storedRun.replyText,
+      replyToTweetId: storedRun.targetTweetId,
+      png,
+    });
+  } catch (error: unknown) {
+    const message: string = toErrorMessage(error);
+    await params.runStore.markFailed(storedRun.runId, message);
+    throw error;
+  }
+
+  await params.runStore.markPosted(storedRun.runId, postResult.postedReplyId);
+
+  return {
+    runId: storedRun.runId,
+    status: 'posted',
+    tweetId: storedRun.targetTweetId,
+    normalizedTweetUrl: storedRun.normalizedTweetUrl,
+    mint: storedRun.mint,
+    replyText: storedRun.replyText,
+    previewImageUrl: `${params.basePath}/preview/${storedRun.runId}.png`,
+    outputJsonPath: storedRun.outputJsonPath ?? '',
+    postedReplyId: postResult.postedReplyId,
+    usedTextOnlyFallback: postResult.usedTextOnlyFallback,
+  };
 }
 
 async function writeRunArtifacts(params: {
@@ -448,9 +480,7 @@ function renderIndexHtml(basePath: string, viewerLabel: string): string {
     h1 { margin: 0 0 8px; font-size: 32px; }
     p { margin: 0 0 20px; color: var(--muted); line-height: 1.5; }
     label { display: block; margin: 0 0 8px; font-weight: 600; }
-    input, textarea, button {
-      font: inherit;
-    }
+    input, button { font: inherit; }
     input {
       width: 100%;
       padding: 14px 16px;
@@ -476,6 +506,7 @@ function renderIndexHtml(basePath: string, viewerLabel: string): string {
     }
     button.preview { background: var(--accent-2); }
     button.post { background: var(--accent); }
+    button.retry { background: var(--accent-2); margin-top: 10px; }
     button:disabled {
       opacity: 0.5;
       cursor: not-allowed;
@@ -640,6 +671,16 @@ function renderIndexHtml(basePath: string, viewerLabel: string): string {
       await loadHistory();
     }
 
+    async function retryRun(runId) {
+      resultEl.textContent = 'Retrying failed run...';
+      const response = await fetch('${basePath}/api/runs/' + encodeURIComponent(runId) + '/retry', {
+        method: 'POST',
+      });
+      const payload = await response.json();
+      resultEl.textContent = JSON.stringify(payload, null, 2);
+      await loadHistory();
+    }
+
     function renderHistory(runs) {
       if (!runs.length) {
         historyEl.textContent = 'No persisted manual runs yet.';
@@ -649,16 +690,24 @@ function renderIndexHtml(basePath: string, viewerLabel: string): string {
       historyEl.innerHTML = runs.map((run) => {
         const error = run.errorMessage ? '<div>Error: ' + escapeHtml(run.errorMessage) + '</div>' : '';
         const reply = run.postedReplyId ? '<div>Reply: <code>' + escapeHtml(run.postedReplyId) + '</code></div>' : '';
+        const retry = run.status === 'failed'
+          ? '<button class="retry" data-run-id="' + escapeHtml(run.runId) + '">Retry Failed Run</button>'
+          : '';
         return [
           '<article class="history-item">',
-          '<strong>' + escapeHtml(run.status.toUpperCase()) + ' · ' + escapeHtml(run.mint) + '</strong>',
+          '<strong>' + escapeHtml(run.status.toUpperCase()) + ' | ' + escapeHtml(run.mint) + '</strong>',
           '<div>Tweet: <code>' + escapeHtml(run.targetTweetId) + '</code></div>',
           '<div>Created: ' + escapeHtml(run.createdAtIso) + '</div>',
           reply,
           error,
+          retry,
           '</article>'
         ].join('');
       }).join('');
+
+      historyEl.querySelectorAll('button[data-run-id]').forEach((button) => {
+        button.addEventListener('click', () => retryRun(button.dataset.runId));
+      });
     }
 
     async function loadHistory() {

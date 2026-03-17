@@ -22,9 +22,9 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
 - Done: persist manual trigger runs, statuses, reply tweet IDs, errors, and timestamps in the file-backed manual run store.
 - Done: add a basic run history view for manual mode.
 - Done: keep preview-first behavior and require explicit confirmation before posting.
-- Keep duplicate protection on `target_tweet_id + mint`.
-- Add retry for failed manual runs.
-- Add text-only fallback if media upload fails but plain reply posting is still possible.
+- Done: keep duplicate protection on `target_tweet_id + mint`.
+- Done: add retry for failed manual runs.
+- Done: add text-only fallback if media upload fails but plain reply posting is still possible.
 - Improve operator-facing errors for:
   - analyzer unavailable
   - X auth failure
@@ -114,7 +114,7 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
 ## Progress Notes
 
 - 2026-03-17: Step 1 completed in `sova-x` with a reusable auth-gated manual route, configurable host/base path, and enforced preview-confirm posting.
-- 2026-03-17: Step 2 started with durable manual run persistence, duplicate checks for `target_tweet_id + mint`, and a basic run history API/UI.
+- 2026-03-17: Step 2 completed for manual mode with durable run persistence, duplicate checks, basic run history, failed-run retry, and text-only post fallback.
 
 ## Explicit Non-Goals For This Backlog
 

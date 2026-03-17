@@ -1,9 +1,8 @@
-import { buildHolderDistributionSummary, buildReplyText } from '../core/summary';
+import { buildReplyContent } from './build-reply-content';
 import { extractSingleMintFromMention } from '../core/solana';
 import { parseXPostUrl } from '../core/x-post-url';
 import type { IntelClient } from '../intel/client';
 import type { TokenMetadataClient } from '../metadata/client';
-import { renderSocialCardSvg } from '../render/social-card';
 
 export type ProcessTriggerResult =
   | { status: 'ignored'; reason: string }
@@ -33,18 +32,18 @@ export async function processTrigger(params: {
     return { status: 'ignored', reason: 'Mint input did not contain exactly one Solana mint candidate.' };
   }
 
-  const [result, metadata] = await Promise.all([
-    params.intelClient.pollHolderProfiles(mint, params.topN),
-    params.metadataClient.getTokenMetadata(mint),
-  ]);
-
-  const summary = buildHolderDistributionSummary(result, metadata, params.topN);
+  const reply = await buildReplyContent({
+    mint,
+    intelClient: params.intelClient,
+    metadataClient: params.metadataClient,
+    topN: params.topN,
+  });
   return {
     status: 'ready',
     tweetId: parsedUrl.tweetId,
     normalizedTweetUrl: parsedUrl.normalizedUrl,
-    mint,
-    replyText: buildReplyText(summary),
-    socialCardSvg: renderSocialCardSvg(summary),
+    mint: reply.mint,
+    replyText: reply.replyText,
+    socialCardSvg: reply.socialCardSvg,
   };
 }
