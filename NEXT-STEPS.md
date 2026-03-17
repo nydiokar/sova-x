@@ -120,6 +120,23 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
 - 2026-03-17: Step 5 started with env-driven posting disable, preview-only mode, and mention dry-run mode wired into the live worker and manual posting path.
 - 2026-03-17: Step 6 started with file-backed counters and structured event logging across manual and mention flows.
 - 2026-03-17: Mention failure handling was hardened with bounded retry/backoff, persisted retry metadata, and terminal classification for reply-restricted/auth/permanent failures.
+- 2026-03-17: Live automatic mention flow was validated end-to-end: mention polling detected a fresh allowed trigger, analysis completed, media reply posted successfully, and `usedTextOnlyFallback` remained `false` (normal media path).
+
+## Session Handoff
+
+- Current status: automatic mention mode is functioning end-to-end on a single host with durable local state.
+- Latest validated live path:
+  - worker polled a fresh mention
+  - allowed operator trigger was accepted
+  - mint was parsed
+  - Intel analysis completed
+  - reply was posted with media
+  - structured logs captured `mention.post.started` and `mention.post.completed`
+- Remaining pre-deploy work is mostly operational hardening, not core bot-path implementation:
+  - replay tooling
+  - explicit polling kill switch
+  - optional admin/config surfacing for spend-cap and metrics
+  - additional review of long-run behavior under PM2/process restarts
 
 ## Explicit Non-Goals For This Backlog
 
