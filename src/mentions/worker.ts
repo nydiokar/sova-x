@@ -205,6 +205,14 @@ export class MentionWorker {
           triggerTweetId: mention.id,
           attempt,
         });
+        await this.store.markPosting({
+          mentionId: mention.id,
+          targetTweetId: mention.id,
+          authorId: mention.authorId,
+          authorUsername: mention.authorUsername,
+          mint: processed.mint,
+          retryCount: attempt - 1,
+        });
         const png: Buffer = await renderSvgToPngBuffer(processed.socialCardSvg);
         const posted = await postReply({
           env: this.env,

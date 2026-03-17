@@ -1,5 +1,5 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
+import { mutateJsonFile, readJsonFile } from '../core/json-file-store';
 
 export type ManualRunStatus = 'previewed' | 'posting' | 'posted' | 'failed';
 
@@ -23,6 +23,9 @@ export type ManualRunRecord = {
 type ManualRunStoreState = {
   runs: ManualRunRecord[];
 };
+
+const MAX_MANUAL_RUNS: number = 500;
+const PREVIEW_LOCK_TTL_MS: number = 60 * 60 * 1000;
 
 export class ManualRunStore {
   private readonly filePath: string;
@@ -48,10 +51,15 @@ export class ManualRunStore {
 
   async hasDuplicateTargetMint(targetTweetId: string, mint: string): Promise<boolean> {
     const state = await this.readState();
+    const nowMs: number = Date.now();
     return state.runs.some((run) =>
       run.targetTweetId === targetTweetId &&
       run.mint === mint &&
-      (run.status === 'previewed' || run.status === 'posting' || run.status === 'posted'),
+      (
+        run.status === 'posted' ||
+        run.status === 'posting' ||
+        (run.status === 'previewed' && nowMs - Date.parse(run.updatedAtIso) <= PREVIEW_LOCK_TTL_MS)
+      ),
     );
   }
 
@@ -85,6 +93,7 @@ export class ManualRunStore {
 
     await this.mutateState((state) => {
       state.runs.push(record);
+      pruneRuns(state);
     });
 
     return record;
@@ -132,25 +141,30 @@ export class ManualRunStore {
   }
 
   private async mutateState(mutate: (state: ManualRunStoreState) => void): Promise<void> {
-    const state = await this.readState();
-    mutate(state);
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    await fs.writeFile(this.filePath, JSON.stringify(state, null, 2), 'utf8');
+    await mutateJsonFile(this.filePath, createDefaultState, (state) => {
+      mutate(state);
+      pruneRuns(state);
+    });
   }
 
   private async readState(): Promise<ManualRunStoreState> {
-    try {
-      const raw: string = await fs.readFile(this.filePath, 'utf8');
-      const parsed = JSON.parse(raw) as Partial<ManualRunStoreState>;
-      return {
-        runs: Array.isArray(parsed.runs) ? parsed.runs as ManualRunRecord[] : [],
-      };
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { runs: [] };
-      }
-
-      throw error;
-    }
+    const parsed = await readJsonFile<Partial<ManualRunStoreState>>(this.filePath, createDefaultState);
+    return {
+      runs: Array.isArray(parsed.runs) ? parsed.runs as ManualRunRecord[] : [],
+    };
   }
+}
+
+function createDefaultState(): ManualRunStoreState {
+  return { runs: [] };
+}
+
+function pruneRuns(state: ManualRunStoreState): void {
+  if (state.runs.length <= MAX_MANUAL_RUNS) {
+    return;
+  }
+
+  state.runs = [...state.runs]
+    .sort((left, right) => left.createdAtIso.localeCompare(right.createdAtIso))
+    .slice(-MAX_MANUAL_RUNS);
 }

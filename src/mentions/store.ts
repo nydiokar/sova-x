@@ -1,7 +1,7 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
+import { mutateJsonFile, readJsonFile } from '../core/json-file-store';
 
-export type MentionRunStatus = 'ignored' | 'failed' | 'posted';
+export type MentionRunStatus = 'ignored' | 'failed' | 'posted' | 'posting';
 
 export type MentionRunRecord = {
   mentionId: string;
@@ -22,6 +22,8 @@ type MentionStoreState = {
   lastSeenMentionId: string | null;
   mentions: MentionRunRecord[];
 };
+
+const MAX_MENTION_RUNS: number = 2000;
 
 export class MentionStore {
   private readonly filePath: string;
@@ -46,7 +48,42 @@ export class MentionStore {
     return state.mentions.some((mention) => mention.mentionId === mentionId);
   }
 
+  async markPosting(input: {
+    mentionId: string;
+    targetTweetId: string;
+    authorId: string;
+    authorUsername: string | null;
+    mint: string;
+    retryCount: number;
+  }): Promise<void> {
+    await this.upsertMention({
+      mentionId: input.mentionId,
+      targetTweetId: input.targetTweetId,
+      authorId: input.authorId,
+      authorUsername: input.authorUsername,
+      mint: input.mint,
+      status: 'posting',
+      reason: null,
+      retryCount: input.retryCount,
+    });
+  }
+
   async createMention(input: {
+    mentionId: string;
+    targetTweetId: string;
+    authorId: string;
+    authorUsername: string | null;
+    mint: string | null;
+    status: MentionRunStatus;
+    reason: string | null;
+    failureClass?: string | null;
+    retryCount?: number;
+    replyTweetId?: string | null;
+  }): Promise<void> {
+    await this.upsertMention(input);
+  }
+
+  private async upsertMention(input: {
     mentionId: string;
     targetTweetId: string;
     authorId: string;
@@ -60,6 +97,21 @@ export class MentionStore {
   }): Promise<void> {
     const nowIso: string = new Date().toISOString();
     await this.mutateState((state) => {
+      const existing = state.mentions.find((mention) => mention.mentionId === input.mentionId);
+      if (existing) {
+        existing.targetTweetId = input.targetTweetId;
+        existing.authorId = input.authorId;
+        existing.authorUsername = input.authorUsername;
+        existing.mint = input.mint;
+        existing.status = input.status;
+        existing.reason = input.reason;
+        existing.failureClass = input.failureClass ?? null;
+        existing.retryCount = input.retryCount ?? existing.retryCount;
+        existing.replyTweetId = input.replyTweetId ?? null;
+        existing.updatedAtIso = nowIso;
+        return;
+      }
+
       state.mentions.push({
         mentionId: input.mentionId,
         targetTweetId: input.targetTweetId,
@@ -74,33 +126,39 @@ export class MentionStore {
         createdAtIso: nowIso,
         updatedAtIso: nowIso,
       });
+      pruneMentions(state);
     });
   }
 
   private async mutateState(mutate: (state: MentionStoreState) => void): Promise<void> {
-    const state = await this.readState();
-    mutate(state);
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    await fs.writeFile(this.filePath, JSON.stringify(state, null, 2), 'utf8');
+    await mutateJsonFile(this.filePath, createDefaultState, (state) => {
+      mutate(state);
+      pruneMentions(state);
+    });
   }
 
   private async readState(): Promise<MentionStoreState> {
-    try {
-      const raw: string = await fs.readFile(this.filePath, 'utf8');
-      const parsed = JSON.parse(raw) as Partial<MentionStoreState>;
-      return {
-        lastSeenMentionId: typeof parsed.lastSeenMentionId === 'string' ? parsed.lastSeenMentionId : null,
-        mentions: Array.isArray(parsed.mentions) ? parsed.mentions as MentionRunRecord[] : [],
-      };
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return {
-          lastSeenMentionId: null,
-          mentions: [],
-        };
-      }
-
-      throw error;
-    }
+    const parsed = await readJsonFile<Partial<MentionStoreState>>(this.filePath, createDefaultState);
+    return {
+      lastSeenMentionId: typeof parsed.lastSeenMentionId === 'string' ? parsed.lastSeenMentionId : null,
+      mentions: Array.isArray(parsed.mentions) ? parsed.mentions as MentionRunRecord[] : [],
+    };
   }
+}
+
+function createDefaultState(): MentionStoreState {
+  return {
+    lastSeenMentionId: null,
+    mentions: [],
+  };
+}
+
+function pruneMentions(state: MentionStoreState): void {
+  if (state.mentions.length <= MAX_MENTION_RUNS) {
+    return;
+  }
+
+  state.mentions = [...state.mentions]
+    .sort((left, right) => left.createdAtIso.localeCompare(right.createdAtIso))
+    .slice(-MAX_MENTION_RUNS);
 }

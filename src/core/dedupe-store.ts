@@ -1,5 +1,5 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
+import { mutateJsonFile, readJsonFile } from './json-file-store';
 
 type DedupeEntry = {
   key: string;
@@ -10,6 +10,9 @@ type DedupeEntry = {
 type DedupeState = {
   entries: DedupeEntry[];
 };
+
+const DEDUPE_TTL_MS: number = 30 * 24 * 60 * 60 * 1000;
+const MAX_DEDUPE_ENTRIES: number = 5000;
 
 export class DedupeStore {
   private readonly filePath: string;
@@ -39,29 +42,39 @@ export class DedupeStore {
   }
 
   private async mutateState(mutate: (state: DedupeState) => void): Promise<void> {
-    const state = await this.readState();
-    mutate(state);
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    await fs.writeFile(this.filePath, JSON.stringify(state, null, 2), 'utf8');
+    await mutateJsonFile(this.filePath, createDefaultState, (state) => {
+      pruneEntries(state);
+      mutate(state);
+      pruneEntries(state);
+    });
   }
 
   private async readState(): Promise<DedupeState> {
-    try {
-      const raw: string = await fs.readFile(this.filePath, 'utf8');
-      const parsed = JSON.parse(raw) as Partial<DedupeState>;
-      return {
-        entries: Array.isArray(parsed.entries) ? parsed.entries as DedupeEntry[] : [],
-      };
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { entries: [] };
-      }
-
-      throw error;
-    }
+    const parsed = await readJsonFile<Partial<DedupeState>>(this.filePath, createDefaultState);
+    const state: DedupeState = {
+      entries: Array.isArray(parsed.entries) ? parsed.entries as DedupeEntry[] : [],
+    };
+    pruneEntries(state);
+    return state;
   }
 }
 
 function buildTargetMintKey(targetTweetId: string, mint: string): string {
   return `${targetTweetId}:${mint}`;
+}
+
+function createDefaultState(): DedupeState {
+  return { entries: [] };
+}
+
+function pruneEntries(state: DedupeState): void {
+  const cutoffMs: number = Date.now() - DEDUPE_TTL_MS;
+  state.entries = state.entries.filter((entry) => Date.parse(entry.createdAtIso) >= cutoffMs);
+  if (state.entries.length <= MAX_DEDUPE_ENTRIES) {
+    return;
+  }
+
+  state.entries = [...state.entries]
+    .sort((left, right) => left.createdAtIso.localeCompare(right.createdAtIso))
+    .slice(-MAX_DEDUPE_ENTRIES);
 }

@@ -197,6 +197,11 @@ async function runTrigger(params: {
       throw new Error('Preview token does not match the requested tweet URL and mint.');
     }
 
+    const dedupeClaimed = await params.dedupeStore.claimTargetMint(storedRun.targetTweetId, storedRun.mint, storedRun.runId);
+    if (!dedupeClaimed) {
+      throw new Error('A run for this target tweet and mint was already claimed elsewhere.');
+    }
+
     await params.runStore.markPosting(storedRun.runId);
     logEvent('manual.post.started', {
       runId: storedRun.runId,
@@ -284,15 +289,6 @@ async function runTrigger(params: {
     mint: triggerResult.mint,
     replyText: triggerResult.replyText,
   });
-  const dedupeClaimed = await params.dedupeStore.claimTargetMint(triggerResult.tweetId, triggerResult.mint, runId);
-  if (!dedupeClaimed) {
-    logEvent('manual.preview.duplicate', {
-      mode: 'manual',
-      mint: triggerResult.mint,
-      triggerTweetId: triggerResult.tweetId,
-    });
-    throw new Error('A manual run for this target tweet and mint already exists.');
-  }
 
   previewRuns.set(previewToken, {
     runId,
