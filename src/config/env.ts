@@ -24,6 +24,11 @@ export type SovaXEnv = {
   pollIntervalMs: number;
   defaultTopN: number;
   outputDir: string;
+  manualHost: string;
+  manualPort: number;
+  manualBasePath: string;
+  manualAllowedUserIds: string[];
+  manualAllowedUserEmails: string[];
 };
 
 function parseInteger(name: string, fallback: number): number {
@@ -72,6 +77,11 @@ export function loadEnv(): SovaXEnv {
     pollIntervalMs: parseInteger('SOVA_X_POLL_INTERVAL_MS', 5000),
     defaultTopN: parseInteger('SOVA_X_TOP_N', 20),
     outputDir: path.resolve(process.cwd(), process.env.SOVA_X_OUTPUT_DIR ?? './out'),
+    manualHost: process.env.SOVA_X_MANUAL_HOST ?? '0.0.0.0',
+    manualPort: parseInteger('SOVA_X_MANUAL_PORT', 8787),
+    manualBasePath: process.env.SOVA_X_MANUAL_BASE_PATH ?? '/manual-trigger',
+    manualAllowedUserIds: parseCsv(process.env.SOVA_X_MANUAL_ALLOWED_USER_IDS),
+    manualAllowedUserEmails: parseCsv(process.env.SOVA_X_MANUAL_ALLOWED_USER_EMAILS).map((email) => email.toLowerCase()),
   };
 }
 

@@ -17,11 +17,11 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
 
 ## Vector 1: Manual Trigger Production Readiness
 
-- Mount the existing manual trigger flow behind main dashboard login instead of serving it only as a local standalone page.
-- Restrict manual mode to trusted internal users only.
-- Persist manual trigger runs, statuses, reply tweet IDs, errors, and timestamps.
-- Add a basic run history view for manual mode.
-- Keep preview-first behavior and require explicit confirmation before posting.
+- Done: mount the existing manual trigger flow as a reusable server route instead of only a localhost-only inline page.
+- Done: restrict manual mode to trusted internal users only via forwarded dashboard auth headers and explicit allowlists.
+- Done: persist manual trigger runs, statuses, reply tweet IDs, errors, and timestamps in the file-backed manual run store.
+- Done: add a basic run history view for manual mode.
+- Done: keep preview-first behavior and require explicit confirmation before posting.
 - Keep duplicate protection on `target_tweet_id + mint`.
 - Add retry for failed manual runs.
 - Add text-only fallback if media upload fails but plain reply posting is still possible.
@@ -31,7 +31,7 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
   - reply restriction on the target conversation
   - invalid tweet URL
   - invalid mint
-- Make manual mode deployable as a server route with no localhost-only assumptions.
+- Done: make manual mode deployable as a server route with no localhost-only assumptions.
 
 ## Vector 2: Mention Polling Production Path
 
@@ -110,6 +110,11 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
 4. Implement the real mention polling worker with durable `since_id`.
 5. Add kill switch, preview-only mode, and dry-run mode.
 6. Add usage counters and operational logging.
+
+## Progress Notes
+
+- 2026-03-17: Step 1 completed in `sova-x` with a reusable auth-gated manual route, configurable host/base path, and enforced preview-confirm posting.
+- 2026-03-17: Step 2 started with durable manual run persistence, duplicate checks for `target_tweet_id + mint`, and a basic run history API/UI.
 
 ## Explicit Non-Goals For This Backlog
 

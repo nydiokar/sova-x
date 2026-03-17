@@ -1,102 +1,165 @@
-# sova-x
+<div align="center">
 
-Standalone X reply tool for Sova Intel.
+<img src="https://sova.intel/badge.svg" alt="Sova Intel" width="80" />
 
-This service has two operating modes:
+# SOVA X
 
-- primary mode: operator-only mention polling on X with explicit mint-in-mention triggers
-- fallback mode: an internal manual trigger page that takes a trigger tweet URL and mint
+### Real-Time Holder Intelligence, Native on X
 
-In both modes, it calls Sova Intel holder profiles through the SDK and posts a single compact holder-profile reply in-thread.
+**Know who's holding. Know how they trade. Posted directly in your thread.**
 
-The analyzer remains the intelligence layer only.
+[![Powered by Sova Intel](https://img.shields.io/badge/Powered%20by-Sova%20Intel-0b1729?style=for-the-badge&labelColor=07111f&color=8f98f7)](#)
+[![Solana](https://img.shields.io/badge/Solana-Native-8fd17c?style=for-the-badge&labelColor=07111f)](#)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Strict-7dc4ec?style=for-the-badge&labelColor=07111f)](#)
 
-See [SPEC.md](C:\Users\Cicada38\Projects\analyzer\sova-x\SPEC.md) for the product and system contract.
+---
 
-## Scaffold status
+*Mention @sova_intel under any Solana token discussion on X.*
+*Within seconds, a beautiful holder profile card appears — right in the thread.*
 
-This repository now includes a minimal TypeScript scaffold with two independent test surfaces:
+</div>
 
-- local render validation
-- X transport validation
+<br/>
 
-That separation is intentional:
+## The Problem
 
-- local render can be tested without hitting X
-- reply-post behavior can be tested without the full holder-profile pipeline
-- mention polling can be tested separately from reply rendering
+Every Solana thread is full of conviction — and full of noise. Someone says a token is "held by diamond hands." Someone else says it's "all snipers." Nobody has data. Everyone is guessing.
 
-## Current scripts
+**Until now.**
 
-- `build` - compile TypeScript
-- `verify` - type-check only
-- `test:render` - write local holder-distribution SVG/PNG cards and summary JSON
-- `test:live-render <mint>` - call the live SDK and write real holder-distribution SVG/PNG cards and summary JSON
-- `test:parse` - validate mint extraction from a mention string
-- `test:x:mentions [sinceId]` - fetch mentions for the configured bot user, including author metadata, then filter locally to allowed operator IDs
-- `test:x:oauth1-me` - verify OAuth 1.0a user-context auth against `GET /users/me`
-- `test:x:oauth2-start` - generate an OAuth 2.0 PKCE authorize URL and store the PKCE session locally
-- `test:x:oauth2-listen` - start a local callback receiver on the configured redirect URI and finish the token exchange automatically
-- `test:x:oauth2-complete "<callback_url>"` - exchange the callback code for a user access token
-- `test:x:post` - post a simple text tweet with OAuth 1.0a user-context credentials
-- `test:x:media-post [pngPath] [replyToTweetId] [text...]` - upload a PNG and create a post or reply with attached media
-- `manual:server` - start a tiny local internal page for manual `tweetUrl + mint` preview/post flow
+<br/>
 
-## Local workflow
+## What Sova X Does
 
-1. Build the project
-2. Run `test:render`
-3. Inspect `out/holder-distribution-card.png`
-4. Run `test:live-render <mint>` to validate live holder-profile output
-5. For OAuth 2.0 PKCE, run `test:x:oauth2-listen`, then `test:x:oauth2-start`, then approve the app in the browser
-6. Run `test:x:mentions` to validate the operator-only mention path
-7. Run `test:x:post` and `test:x:media-post` separately when credentials are configured
-8. Run `manual:server` to test the fallback internal trigger flow in a browser
+Sova X brings **institutional-grade holder profiling** directly into X conversations. No dashboards to open. No links to click. No screenshots to squint at.
 
-## Intended operating model
+An operator mentions `@sova_intel` with a token mint, and the system delivers a **deterministic, data-rich social card** as an in-thread reply — powered by the full analytical depth of Sova Intel's holder profiling engine.
 
-Primary mode:
+<br/>
 
-1. An operator replies on X and mentions `@sova_intel` with the mint in the mention text
-2. `sova-x` polls the mentions timeline with `since_id`
-3. `sova-x` reads all returned mentions from X
-4. `sova-x` filters locally to `X_ALLOWED_CALLER_IDS`
-5. Only allowed-operator mentions can trigger analysis and reply posting
-6. The bot replies to the operator's trigger tweet in-thread
+<div align="center">
 
-Important constraint:
+### One mention. One card. Complete clarity.
 
-- X mention timelines cannot be filtered server-side to only your operators
-- filtering happens after the mentions are returned
-- that means all returned mentions can still count toward X usage
+</div>
 
-Risk control:
+<br/>
 
-- set a hard monthly spend cap in the X Developer Console
-- keep trigger operators restricted by `X_ALLOWED_CALLER_IDS`
-- require explicit mint-in-mention parsing
+## What You Get
 
-Plan B fallback:
+### Trader Distribution Breakdown
 
-1. A human operator uses the internal trigger page
-2. The operator pastes the trigger tweet URL and mint
-3. `sova-x` runs holder profiles, renders the social card, and posts one reply under that trigger tweet
+Every card visualizes the **supply-weighted holding patterns** of the top 20 holders, classified by behavioral archetype:
 
-This fallback is already implemented locally and can be served behind existing dashboard auth later.
+| Archetype | Typical Timeframe |
+|---|---|
+| **Sniper** | < 10 seconds |
+| **Scalper** | < 1 minute |
+| **Momentum** | 5 – 30 minutes |
+| **Intraday** | 30 min – 4 hours |
+| **Day Trader** | 4 – 24 hours |
+| **Swing** | 1 – 7 days |
+| **Position** | 7+ days |
+| **Fresh** | No exit history |
 
-For local testing, the manual trigger UI runs at `http://127.0.0.1:8787` and supports:
+Each bar shows **exactly how much supply** is concentrated in each trader type — not wallet counts, not vibes. Real distribution, weighted by holdings.
 
-- previewing the generated reply text + image
-- posting the reply under the provided trigger tweet when credentials are configured
-- acting as a production fallback if mention polling is disabled
+### Fresh Supply Detection
 
-## Important limitations in the scaffold
+Every card surfaces the **fresh wallet percentage** — the share of supply held by wallets with no exit history on the token. A single number that instantly tells you how much of the cap table is untested.
 
-- live Sova Intel SDK integration is not wired yet
-- live Sova Intel SDK integration is available via `test:live-render`
-- token metadata lookup uses lightweight Dexscreener fetch with fallback-to-mint behavior
-- PNG generation is wired
-- PNG upload to X is wired for the simple single-image path via OAuth 2.0 bearer access token
-- media posting is wired for a single uploaded PNG
-- upload-status polling after finalize is not implemented yet
-- manual mode currently runs as a local standalone page, not yet mounted inside the main dashboard auth flow
+### Token-Aware Presentation
+
+Cards automatically resolve token metadata — symbol, icon, and shortened mint — so every reply looks clean and contextual, not like a raw data dump.
+
+<br/>
+
+## How It Works
+
+<div align="center">
+
+**Mention** → **Profile** → **Render** → **Reply**
+
+</div>
+
+1. A trusted operator mentions `@sova_intel` with a Solana mint address in any X thread
+2. Sova X picks up the mention and validates the operator and the mint
+3. The Sova Intel SDK runs **deep holder profiling** on the top 20 holders
+4. A deterministic **1200×675 PNG social card** is rendered server-side — no headless browsers, no screenshots
+5. The card is posted as an **in-thread reply** under the original conversation
+
+The entire pipeline — from mention to posted reply — is automated, auditable, and built for speed.
+
+<br/>
+
+## Native X Mentions
+
+The flagship experience. Operators mention `@sova_intel` directly in live X threads. The bot polls its mentions timeline, filters to authorized operators, extracts the mint, and delivers the card in-thread.
+
+**This is holder intelligence that lives where the conversation already is.**
+
+<br/>
+
+## Built for Trust
+
+- **Operator-only access** — only explicitly authorized X accounts can trigger analysis
+- **Strict mint parsing** — no guessing, no inference, no ambiguity. One valid Solana address or nothing
+- **Deduplication** — the same tweet + mint combination won't produce duplicate replies
+- **Silent failure** — if something goes wrong, the bot stays quiet. No public error messages, ever
+- **Deterministic rendering** — identical data always produces an identical card. No flicker, no variance
+
+<br/>
+
+## Architecture
+
+Sova X is a **standalone service** that treats Sova Intel purely as an intelligence layer via its public SDK. It owns no analytical logic. It copies no internal code. It is a clean, single-purpose delivery surface.
+
+```
+sova-x
+├── app/          → Mention processing & trigger pipeline
+├── core/         → Distribution computation, summary generation
+├── intel/        → Sova Intel SDK integration
+├── metadata/     → Token symbol, icon & mint resolution
+├── render/       → Deterministic SVG → PNG social card generation
+├── x/            → Full X API client (OAuth 1.0a + OAuth 2.0 PKCE)
+└── config/       → Environment & credential management
+```
+
+<br/>
+
+## The Sova Intel Ecosystem
+
+Sova X is one surface of the **Sova Intel** analytical platform — purpose-built for Solana token holder intelligence.
+
+| Surface | Purpose |
+|---|---|
+| **[Sova Intel API](https://docs.sova-intel.com/)** | The analytical engine — holder profiling, behavioral classification, supply analysis |
+| **Sova Intel SDK** | Programmatic access to the full intelligence layer |
+| **Sova Intel Dashboard** | Interactive visual exploration of holder profiles |
+| **Sova X** | Real-time holder intelligence delivered natively on X |
+
+Every surface shares the same analytical foundation. Same data. Same methodology. Same depth.
+
+### For AI Agents
+
+Sova Intel exposes a **machine-readable skill definition** at [`sova-intel.com/skill.md`](https://sova-intel.com/skill.md) — purpose-built for AI agents and autonomous workflows. Any agent that can read a skill file can integrate Sova Intel's holder profiling capabilities directly, no custom integration work required.
+
+### API Documentation
+
+Full API reference, authentication guides, and integration examples are available at **[docs.sova-intel.com](https://docs.sova-intel.com/)**.
+
+<br/>
+
+<div align="center">
+
+---
+
+<br/>
+
+**Sova X** — Holder intelligence that meets the conversation where it happens.
+
+<br/>
+
+*Built by the Sova Intel team.*
+
+</div>
