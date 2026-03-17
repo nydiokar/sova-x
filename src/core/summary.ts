@@ -33,11 +33,8 @@ export function buildHolderDistributionSummary(
 
 export function buildReplyText(summary: HolderDistributionSummary): string {
   return [
-    'Holder Profiles',
-    `Top ${summary.topN} holder holding patterns`,
-    `Fresh supply: ${Math.round(summary.freshSupplyPercent)}%`,
-    `Generated: ${formatUtcTimestamp(summary.generatedAtIso)}`,
-    'Powered by Sova Intel',
+    `$${summary.tokenSymbol} Holder Profiles`,
+    `Top ${summary.topN} holders | Fresh supply: ${Math.round(summary.freshSupplyPercent)}%`,
   ].join('\n');
 }
 
