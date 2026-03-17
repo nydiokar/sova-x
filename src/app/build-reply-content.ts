@@ -20,6 +20,10 @@ export async function buildReplyContent(params: {
     params.metadataClient.getTokenMetadata(params.mint),
   ]);
 
+  if (result.profiles.length === 0) {
+    throw new Error(`No holder data returned for mint ${params.mint}`);
+  }
+
   const summary = buildHolderDistributionSummary(result, metadata, params.topN);
   const tokenImageDataUri = summary.tokenImageUrl
     ? await fetchImageAsDataUri(summary.tokenImageUrl)

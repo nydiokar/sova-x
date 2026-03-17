@@ -138,6 +138,10 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
   - optional admin/config surfacing for spend-cap and metrics
   - additional review of long-run behavior under PM2/process restarts
 
+## Bug Fixes
+
+- Done: guard against rendering and posting a card when the Sova Intel API returns empty profiles. Empty `profiles: []` now throws early in `buildReplyContent`, preventing a meaningless all-zero card from being posted.
+
 ## Explicit Non-Goals For This Backlog
 
 Do not expand this file with tasks that belong to the main analyzer backend, including:
