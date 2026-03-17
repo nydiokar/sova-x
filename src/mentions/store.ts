@@ -11,6 +11,8 @@ export type MentionRunRecord = {
   mint: string | null;
   status: MentionRunStatus;
   reason: string | null;
+  failureClass: string | null;
+  retryCount: number;
   replyTweetId: string | null;
   createdAtIso: string;
   updatedAtIso: string;
@@ -52,6 +54,8 @@ export class MentionStore {
     mint: string | null;
     status: MentionRunStatus;
     reason: string | null;
+    failureClass?: string | null;
+    retryCount?: number;
     replyTweetId?: string | null;
   }): Promise<void> {
     const nowIso: string = new Date().toISOString();
@@ -64,6 +68,8 @@ export class MentionStore {
         mint: input.mint,
         status: input.status,
         reason: input.reason,
+        failureClass: input.failureClass ?? null,
+        retryCount: input.retryCount ?? 0,
         replyTweetId: input.replyTweetId ?? null,
         createdAtIso: nowIso,
         updatedAtIso: nowIso,

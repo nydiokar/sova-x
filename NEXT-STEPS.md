@@ -50,7 +50,7 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
   - Done: duplicate
   - Done: self-mention
 - Done: persist failure reasons for reply or analysis failures.
-- Add safe retry/backoff for transient X or analyzer failures.
+- Done: add safe retry/backoff for transient X or analyzer failures.
 - Add a hard kill switch to stop polling without code changes.
 - Add a dry-run mode that reads and classifies mentions without replying.
 
@@ -100,7 +100,7 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
   - one mention trigger
   - one manual trigger run
 - Capture and persist X API error bodies for debugging.
-- Handle reply-restricted conversations gracefully and mark them failed without infinite retry.
+- Done: handle reply-restricted conversations gracefully and mark them failed without infinite retry.
 
 ## Recommended Implementation Order
 
@@ -119,6 +119,7 @@ It intentionally excludes concerns that belong to the main analyzer backend, suc
 - 2026-03-17: Step 4 started with a real polling worker, durable `last_seen_mention_id`, persisted mention outcomes, and shared target-tweet-plus-mint dedupe across manual and mention flows.
 - 2026-03-17: Step 5 started with env-driven posting disable, preview-only mode, and mention dry-run mode wired into the live worker and manual posting path.
 - 2026-03-17: Step 6 started with file-backed counters and structured event logging across manual and mention flows.
+- 2026-03-17: Mention failure handling was hardened with bounded retry/backoff, persisted retry metadata, and terminal classification for reply-restricted/auth/permanent failures.
 
 ## Explicit Non-Goals For This Backlog
 

@@ -1,3 +1,4 @@
+import { classifyFailure } from '../core/failure-classifier';
 import { processMention } from '../app/process-mention';
 import { DedupeStore } from '../core/dedupe-store';
 import { logEvent } from '../core/logger';
@@ -12,6 +13,8 @@ import { postReply } from '../x/reply-poster';
 import { XClient } from '../x/x-client';
 
 export class MentionWorker {
+  private readonly maxProcessingAttempts: number = 3;
+  private readonly retryBaseDelayMs: number;
   private readonly store: MentionStore;
   private readonly dedupeStore: DedupeStore;
   private readonly metricsStore: MetricsStore;
@@ -29,6 +32,7 @@ export class MentionWorker {
     }
 
     this.store = new MentionStore(env.outputDir);
+    this.retryBaseDelayMs = env.pollIntervalMs;
     this.dedupeStore = new DedupeStore(env.outputDir);
     this.metricsStore = new MetricsStore(env.outputDir);
     this.readClient = new XClient(env.xApiBaseUrl, { kind: 'bearer', token: env.xBearerToken });
@@ -122,169 +126,179 @@ export class MentionWorker {
     }
 
     await this.metricsStore.increment('validOperatorTriggers');
-    const processed = await processMention({
-      mention,
-      intelClient: this.intelClient,
-      metadataClient: this.metadataClient,
-      topN: this.env.defaultTopN,
+    await this.handleAuthorizedMention(mention);
+  }
+
+  private async handleAuthorizedMention(mention: XMention): Promise<void> {
+    for (let attempt = 1; attempt <= this.maxProcessingAttempts; attempt += 1) {
+      try {
+        const processed = await processMention({
+          mention,
+          intelClient: this.intelClient,
+          metadataClient: this.metadataClient,
+          topN: this.env.defaultTopN,
+        });
+
+        if (processed.status !== 'ready') {
+          await this.metricsStore.increment('mentionsIgnored');
+          await this.store.createMention({
+            mentionId: mention.id,
+            targetTweetId: mention.id,
+            authorId: mention.authorId,
+            authorUsername: mention.authorUsername,
+            mint: null,
+            status: 'ignored',
+            reason: 'invalid mint',
+            retryCount: attempt - 1,
+          });
+          logEvent('mention.ignored', {
+            mentionId: mention.id,
+            mode: 'mention',
+            reason: 'invalid mint',
+            triggerTweetId: mention.id,
+          });
+          return;
+        }
+
+        const dedupeClaimed = await this.dedupeStore.claimTargetMint(mention.id, processed.mint, mention.id);
+        if (!dedupeClaimed) {
+          await this.metricsStore.increment('mentionsIgnored');
+          await this.store.createMention({
+            mentionId: mention.id,
+            targetTweetId: mention.id,
+            authorId: mention.authorId,
+            authorUsername: mention.authorUsername,
+            mint: processed.mint,
+            status: 'ignored',
+            reason: 'duplicate',
+            retryCount: attempt - 1,
+          });
+          logEvent('mention.ignored', {
+            mentionId: mention.id,
+            mode: 'mention',
+            mint: processed.mint,
+            reason: 'duplicate',
+            triggerTweetId: mention.id,
+          });
+          return;
+        }
+
+        if (this.env.disablePosting) {
+          await this.ignoreReadyMention(mention, processed.mint, 'posting disabled', attempt - 1);
+          return;
+        }
+
+        if (this.env.previewOnlyMode) {
+          await this.ignoreReadyMention(mention, processed.mint, 'preview-only mode', attempt - 1);
+          return;
+        }
+
+        if (this.env.mentionDryRunMode) {
+          await this.ignoreReadyMention(mention, processed.mint, 'dry-run mode', attempt - 1);
+          return;
+        }
+
+        logEvent('mention.post.started', {
+          mentionId: mention.id,
+          mode: 'mention',
+          mint: processed.mint,
+          triggerTweetId: mention.id,
+          attempt,
+        });
+        const png: Buffer = await renderSvgToPngBuffer(processed.socialCardSvg);
+        const posted = await postReply({
+          env: this.env,
+          replyText: processed.replyText,
+          replyToTweetId: mention.id,
+          png,
+        });
+        await this.store.createMention({
+          mentionId: mention.id,
+          targetTweetId: mention.id,
+          authorId: mention.authorId,
+          authorUsername: mention.authorUsername,
+          mint: processed.mint,
+          status: 'posted',
+          reason: posted.usedTextOnlyFallback ? 'text-only fallback' : null,
+          retryCount: attempt - 1,
+          replyTweetId: posted.postedReplyId,
+        });
+        await this.metricsStore.increment('repliesPosted');
+        logEvent('mention.post.completed', {
+          mentionId: mention.id,
+          mode: 'mention',
+          mint: processed.mint,
+          triggerTweetId: mention.id,
+          replyTweetId: posted.postedReplyId,
+          usedTextOnlyFallback: posted.usedTextOnlyFallback,
+          attempt,
+        });
+        return;
+      } catch (error: unknown) {
+        const classified = classifyFailure(error);
+        logEvent('mention.processing.error', {
+          mentionId: mention.id,
+          mode: 'mention',
+          triggerTweetId: mention.id,
+          attempt,
+          failureClass: classified.failureClass,
+          retryable: classified.retryable,
+          error: classified.message,
+        });
+
+        if (classified.retryable && attempt < this.maxProcessingAttempts) {
+          await delay(this.retryBaseDelayMs * attempt);
+          continue;
+        }
+
+        await this.store.createMention({
+          mentionId: mention.id,
+          targetTweetId: mention.id,
+          authorId: mention.authorId,
+          authorUsername: mention.authorUsername,
+          mint: null,
+          status: 'failed',
+          reason: classified.message,
+          failureClass: classified.failureClass,
+          retryCount: attempt,
+        });
+        logEvent('mention.post.failed', {
+          mentionId: mention.id,
+          mode: 'mention',
+          triggerTweetId: mention.id,
+          failureClass: classified.failureClass,
+          retryCount: attempt,
+          error: classified.message,
+        });
+        return;
+      }
+    }
+  }
+
+  private async ignoreReadyMention(
+    mention: XMention,
+    mint: string,
+    reason: string,
+    retryCount: number,
+  ): Promise<void> {
+    await this.metricsStore.increment('mentionsIgnored');
+    await this.store.createMention({
+      mentionId: mention.id,
+      targetTweetId: mention.id,
+      authorId: mention.authorId,
+      authorUsername: mention.authorUsername,
+      mint,
+      status: 'ignored',
+      reason,
+      retryCount,
     });
-
-    if (processed.status !== 'ready') {
-      await this.metricsStore.increment('mentionsIgnored');
-      await this.store.createMention({
-        mentionId: mention.id,
-        targetTweetId: mention.id,
-        authorId: mention.authorId,
-        authorUsername: mention.authorUsername,
-        mint: null,
-        status: 'ignored',
-        reason: 'invalid mint',
-      });
-      logEvent('mention.ignored', {
-        mentionId: mention.id,
-        mode: 'mention',
-        reason: 'invalid mint',
-        triggerTweetId: mention.id,
-      });
-      return;
-    }
-
-    const dedupeClaimed = await this.dedupeStore.claimTargetMint(mention.id, processed.mint, mention.id);
-    if (!dedupeClaimed) {
-      await this.metricsStore.increment('mentionsIgnored');
-      await this.store.createMention({
-        mentionId: mention.id,
-        targetTweetId: mention.id,
-        authorId: mention.authorId,
-        authorUsername: mention.authorUsername,
-        mint: processed.mint,
-        status: 'ignored',
-        reason: 'duplicate',
-      });
-      logEvent('mention.ignored', {
-        mentionId: mention.id,
-        mode: 'mention',
-        mint: processed.mint,
-        reason: 'duplicate',
-        triggerTweetId: mention.id,
-      });
-      return;
-    }
-
-    if (this.env.disablePosting) {
-      await this.metricsStore.increment('mentionsIgnored');
-      await this.store.createMention({
-        mentionId: mention.id,
-        targetTweetId: mention.id,
-        authorId: mention.authorId,
-        authorUsername: mention.authorUsername,
-        mint: processed.mint,
-        status: 'ignored',
-        reason: 'posting disabled',
-      });
-      logEvent('mention.ignored', {
-        mentionId: mention.id,
-        mode: 'mention',
-        mint: processed.mint,
-        reason: 'posting disabled',
-        triggerTweetId: mention.id,
-      });
-      return;
-    }
-
-    if (this.env.previewOnlyMode) {
-      await this.metricsStore.increment('mentionsIgnored');
-      await this.store.createMention({
-        mentionId: mention.id,
-        targetTweetId: mention.id,
-        authorId: mention.authorId,
-        authorUsername: mention.authorUsername,
-        mint: processed.mint,
-        status: 'ignored',
-        reason: 'preview-only mode',
-      });
-      logEvent('mention.ignored', {
-        mentionId: mention.id,
-        mode: 'mention',
-        mint: processed.mint,
-        reason: 'preview-only mode',
-        triggerTweetId: mention.id,
-      });
-      return;
-    }
-
-    if (this.env.mentionDryRunMode) {
-      await this.metricsStore.increment('mentionsIgnored');
-      await this.store.createMention({
-        mentionId: mention.id,
-        targetTweetId: mention.id,
-        authorId: mention.authorId,
-        authorUsername: mention.authorUsername,
-        mint: processed.mint,
-        status: 'ignored',
-        reason: 'dry-run mode',
-      });
-      logEvent('mention.ignored', {
-        mentionId: mention.id,
-        mode: 'mention',
-        mint: processed.mint,
-        reason: 'dry-run mode',
-        triggerTweetId: mention.id,
-      });
-      return;
-    }
-
-    try {
-      logEvent('mention.post.started', {
-        mentionId: mention.id,
-        mode: 'mention',
-        mint: processed.mint,
-        triggerTweetId: mention.id,
-      });
-      const png: Buffer = await renderSvgToPngBuffer(processed.socialCardSvg);
-      const posted = await postReply({
-        env: this.env,
-        replyText: processed.replyText,
-        replyToTweetId: mention.id,
-        png,
-      });
-      await this.store.createMention({
-        mentionId: mention.id,
-        targetTweetId: mention.id,
-        authorId: mention.authorId,
-        authorUsername: mention.authorUsername,
-        mint: processed.mint,
-        status: 'posted',
-        reason: posted.usedTextOnlyFallback ? 'text-only fallback' : null,
-        replyTweetId: posted.postedReplyId,
-      });
-      await this.metricsStore.increment('repliesPosted');
-      logEvent('mention.post.completed', {
-        mentionId: mention.id,
-        mode: 'mention',
-        mint: processed.mint,
-        triggerTweetId: mention.id,
-        replyTweetId: posted.postedReplyId,
-        usedTextOnlyFallback: posted.usedTextOnlyFallback,
-      });
-    } catch (error: unknown) {
-      await this.store.createMention({
-        mentionId: mention.id,
-        targetTweetId: mention.id,
-        authorId: mention.authorId,
-        authorUsername: mention.authorUsername,
-        mint: processed.mint,
-        status: 'failed',
-        reason: toErrorMessage(error),
-      });
-      logEvent('mention.post.failed', {
-        mentionId: mention.id,
-        mode: 'mention',
-        mint: processed.mint,
-        triggerTweetId: mention.id,
-        error: toErrorMessage(error),
-      });
-    }
+    logEvent('mention.ignored', {
+      mentionId: mention.id,
+      mode: 'mention',
+      mint,
+      reason,
+      triggerTweetId: mention.id,
+    });
   }
 }
 
