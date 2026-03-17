@@ -73,6 +73,26 @@ Production expectations for manual mode:
 - persistent `last_seen_mention_id`
 - persistent trigger state and failure reasons
 
+## PM2 Runtime
+
+The mention worker is intended to run as a single PM2 forked process using the checked-in [ecosystem.config.cjs](./ecosystem.config.cjs).
+
+Recommended production shape:
+
+- build first with `npm run build`
+- run one instance only to avoid duplicate polling and file-store contention
+- keep `SOVA_X_OUTPUT_DIR` on persistent disk because it stores `last_seen_mention_id`, mention history, dedupe state, and metrics
+- let PM2 restart the process, but preserve the same working directory and output directory across restarts
+- review `out/logs/mention-worker.out.log` and `out/logs/mention-worker.err.log` for structured event logs and failures
+
+PM2 does not rotate `out/logs/mention-worker.out.log` or `out/logs/mention-worker.err.log` by itself in this repo config. Production should enable the PM2 log rotation module on the server:
+
+- `pm2 install pm2-logrotate`
+- `pm2 set pm2-logrotate:max_size 10M`
+- `pm2 set pm2-logrotate:retain 14`
+- `pm2 set pm2-logrotate:compress true`
+- `pm2 set pm2-logrotate:rotateInterval '0 0 * * *'`
+
 ## Important Files
 
 - [SPEC.md](./SPEC.md) - detailed system/product contract

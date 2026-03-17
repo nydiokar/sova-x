@@ -15,6 +15,8 @@ import { XClient } from '../x/x-client';
 export class MentionWorker {
   private readonly maxProcessingAttempts: number = 3;
   private readonly retryBaseDelayMs: number;
+  private readonly stalePostingMs: number;
+  private stopRequested = false;
   private readonly store: MentionStore;
   private readonly dedupeStore: DedupeStore;
   private readonly metricsStore: MetricsStore;
@@ -33,6 +35,7 @@ export class MentionWorker {
 
     this.store = new MentionStore(env.outputDir);
     this.retryBaseDelayMs = env.pollIntervalMs;
+    this.stalePostingMs = Math.max(env.pollIntervalMs * 6, 60_000);
     this.dedupeStore = new DedupeStore(env.outputDir);
     this.metricsStore = new MetricsStore(env.outputDir);
     this.readClient = new XClient(env.xApiBaseUrl, { kind: 'bearer', token: env.xBearerToken });
@@ -44,12 +47,20 @@ export class MentionWorker {
     this.metadataClient = new DexscreenerTokenMetadataClient();
   }
 
+  requestStop(): void {
+    this.stopRequested = true;
+  }
+
   async runForever(): Promise<void> {
-    while (true) {
+    while (!this.stopRequested) {
       try {
         await this.pollOnce();
       } catch (error: unknown) {
         console.error('[mention-worker] poll failed', toErrorMessage(error));
+      }
+
+      if (this.stopRequested) {
+        break;
       }
 
       await delay(this.env.pollIntervalMs);
@@ -81,6 +92,17 @@ export class MentionWorker {
   }
 
   private async handleMention(mention: XMention): Promise<void> {
+    const stalePosting = await this.store.failIfStalePosting(mention.id, this.stalePostingMs);
+    if (stalePosting) {
+      logEvent('mention.posting.stale', {
+        mentionId: mention.id,
+        mode: 'mention',
+        mint: stalePosting.mint,
+        reason: stalePosting.reason,
+        triggerTweetId: mention.id,
+      });
+    }
+
     if (await this.store.hasMention(mention.id)) {
       return;
     }

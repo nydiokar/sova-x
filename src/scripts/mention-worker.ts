@@ -8,6 +8,12 @@ async function main(): Promise<void> {
   }
 
   const worker = new MentionWorker(env);
+  const requestStop = (signal: NodeJS.Signals): void => {
+    console.log(`[mention-worker] received ${signal}, stopping after the current cycle`);
+    worker.requestStop();
+  };
+  process.once('SIGINT', requestStop);
+  process.once('SIGTERM', requestStop);
   await worker.runForever();
 }
 

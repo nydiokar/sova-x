@@ -18,17 +18,9 @@ export async function postReply(params: {
   const xClient = new XClient(params.env.xApiBaseUrl, auth);
   const mediaClient = new XMediaClient(params.env.xApiBaseUrl, auth);
 
+  let uploaded: Awaited<ReturnType<XMediaClient['uploadPng']>>;
   try {
-    const uploaded = await mediaClient.uploadPng(params.png);
-    const post = await xClient.createPost({
-      text: params.replyText,
-      replyToTweetId: params.replyToTweetId,
-      mediaIds: [uploaded.mediaId],
-    });
-    return {
-      postedReplyId: post.id,
-      usedTextOnlyFallback: false,
-    };
+    uploaded = await mediaClient.uploadPng(params.png);
   } catch (mediaError: unknown) {
     const post = await xClient.createPost({
       text: params.replyText,
@@ -40,6 +32,16 @@ export async function postReply(params: {
       mediaErrorMessage: mediaError instanceof Error ? mediaError.message : 'Unknown media error',
     };
   }
+
+  const post = await xClient.createPost({
+    text: params.replyText,
+    replyToTweetId: params.replyToTweetId,
+    mediaIds: [uploaded.mediaId],
+  });
+  return {
+    postedReplyId: post.id,
+    usedTextOnlyFallback: false,
+  };
 }
 
 function buildPostAuth(env: SovaXEnv):

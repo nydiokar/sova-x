@@ -24,6 +24,7 @@ type MentionStoreState = {
 };
 
 const MAX_MENTION_RUNS: number = 2000;
+const STALE_POSTING_REASON: string = 'Interrupted during posting before completion was recorded. Manual review required.';
 
 export class MentionStore {
   private readonly filePath: string;
@@ -46,6 +47,28 @@ export class MentionStore {
   async hasMention(mentionId: string): Promise<boolean> {
     const state = await this.readState();
     return state.mentions.some((mention) => mention.mentionId === mentionId);
+  }
+
+  async failIfStalePosting(mentionId: string, staleAfterMs: number): Promise<MentionRunRecord | null> {
+    let updated: MentionRunRecord | null = null;
+    await this.mutateState((state) => {
+      const existing = state.mentions.find((mention) => mention.mentionId === mentionId);
+      if (!existing || existing.status !== 'posting') {
+        return;
+      }
+
+      const ageMs: number = Date.now() - Date.parse(existing.updatedAtIso);
+      if (!Number.isFinite(ageMs) || ageMs < staleAfterMs) {
+        return;
+      }
+
+      existing.status = 'failed';
+      existing.reason = STALE_POSTING_REASON;
+      existing.failureClass = 'permanent';
+      existing.updatedAtIso = new Date().toISOString();
+      updated = { ...existing };
+    });
+    return updated;
   }
 
   async markPosting(input: {
