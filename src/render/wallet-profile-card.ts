@@ -46,8 +46,24 @@ function escapeXml(v: string): string {
 }
 
 function shortenAddress(addr: string): string {
-  if (addr.length <= 16) return addr;
-  return `${addr.slice(0, 6)}...${addr.slice(-6)}`;
+  // Show full address — split into two lines of ~22 chars each for readability
+  return addr;
+}
+
+function formatDataRange(from: string | undefined, to: string | undefined): string {
+  if (!from || !to) return '';
+  const fmt = (iso: string) => iso.slice(0, 10); // YYYY-MM-DD
+  return `Data: ${fmt(from)} → ${fmt(to)}`;
+}
+
+function formatTokensPerDay(v: number | undefined | null): string {
+  if (v == null || !Number.isFinite(v)) return '—';
+  return v < 10 ? v.toFixed(1) : Math.round(v).toString();
+}
+
+function formatAvgTx(sol: number | undefined | null): string {
+  if (sol == null || !Number.isFinite(sol)) return '—';
+  return `${sol.toFixed(2)} SOL`;
 }
 
 function formatHoldTime(hours: number | null): string {
@@ -120,12 +136,22 @@ export function renderWalletProfileCardSvg(data: WalletProfileResponse): string 
   const totalTrades = data.summary?.totalTradesCount ?? null;
   const winTrades = data.summary?.profitableTradesCount ?? null;
 
-  // Overall Holdings = SPL token portfolio value in SOL (from hud, computed server-side via dex prices)
+  // Tokens/day and avg tx — from hud
+  const tokensPerDay = formatTokensPerDay(hud?.uniqueTokensPerDay);
+  const avgTxText = formatAvgTx(hud?.avgTxValueSol);
+
+  // Overall Holdings
   const overallSol = hud?.currentHoldingsSol ?? null;
   const overallHoldingsText = overallSol !== null && overallSol > 0
     ? `${overallSol.toFixed(2)} SOL`
     : '—';
   const overallHoldingsColor = '#7a9ab8';
+
+  // Data window for provenance
+  const dataRange = formatDataRange(
+    hud?.provenance?.dataRange?.from,
+    hud?.provenance?.dataRange?.to,
+  );
 
   // Badge inner SVG
   const badgeInner = SOVA_BADGE_SVG
@@ -172,24 +198,27 @@ ${sub ? `<text x="${x + w / 2}" y="${y + h - 16}" text-anchor="middle"
   // ── Layout ─────────────────────────────────────────────────────────────────
   const contentW = W - pad * 2;
 
-  // 4 tiles: win rate | hold time | realized pnl | overall holdings
-  const tileCount = 4;
-  const tileGap = 16;
-  const tileH = 160;
+  // 5 tiles: win rate | median hold | tokens/day | avg tx value | holdings
+  const tileCount = 5;
+  const tileGap = 12;
+  const tileH = 150;
   const tileW = Math.floor((contentW - tileGap * (tileCount - 1)) / tileCount);
-  const tileTop = 330;
+  const tileTop = 345;
 
   const tileX = (i: number) => pad + i * (tileW + tileGap);
 
   // Pills row
-  const pillY = tileTop + tileH + 52;
+  const pillY = tileTop + tileH + 48;
   const pill1X = pad;
   const pill2X = pad + 150;
-  const pill3X = W - pad - 130 - 150;
-  const pill4X = W - pad - 130;
 
-  // Hero
-  const heroY = 240;
+  // Hero — left side
+  const heroY = 235;
+
+  // PnL inline block — right of hero text
+  // We place it right-aligned to card, vertically centred around heroY
+  const pnlBlockX = W - pad;
+  const pnlBlockY = heroY - 55; // top of the pnl block
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -223,14 +252,10 @@ ${sub ? `<text x="${x + w / 2}" y="${y + h - 16}" text-anchor="middle"
 <text x="${pad + 40}" y="74" fill="#7a9ab8" font-size="16" font-weight="600"
       letter-spacing="0.5" font-family="Segoe UI, system-ui, Arial, sans-serif">Sova Intel</text>
 
-<!-- Wallet address — sits left of tier pill, more prominent -->
-<text x="${W - pad - 150}" y="74" text-anchor="end" fill="#7a9ab8" font-size="14"
-      font-weight="600" letter-spacing="1" font-family="Segoe UI, system-ui, Arial, sans-serif">${escapeXml(shortenAddress(data.walletAddress))}</text>
-
 <!-- Tier pill -->
-<rect x="${W - pad - 130}" y="40" width="120" height="32" rx="16"
+<rect x="${W - pad - 120}" y="40" width="120" height="32" rx="16"
       fill="${tierM.bg}" stroke="${tierM.border}" stroke-width="1.2"/>
-<text x="${W - pad - 70}" y="61" text-anchor="middle" fill="${tierM.color}"
+<text x="${W - pad - 60}" y="61" text-anchor="middle" fill="${tierM.color}"
       font-size="11" font-weight="800" letter-spacing="2"
       font-family="Segoe UI, system-ui, Arial, sans-serif">${escapeXml(tier)}</text>
 
@@ -239,29 +264,43 @@ ${sub ? `<text x="${x + w / 2}" y="${y + h - 16}" text-anchor="middle"
       stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
 
 <!-- ── HERO ─────────────────────────────────────────────────────── -->
-<!-- Eyebrow label -->
-<text x="${pad}" y="138" fill="#3d6080" font-size="11" font-weight="700"
-      letter-spacing="3.5" font-family="Segoe UI, system-ui, Arial, sans-serif">TRADER PROFILE</text>
+<!-- Wallet address pill — full address, prominent -->
+<rect x="${pad}" y="112" width="${contentW}" height="38" rx="8"
+      fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+<text x="${pad + 16}" y="137" fill="#8ab4d4" font-size="14" font-weight="600"
+      letter-spacing="1.2" font-family="Segoe UI Mono, Consolas, monospace">${escapeXml(data.walletAddress)}</text>
 
-<!-- Trading style — big hero -->
+<!-- Trading style — big hero (left side) -->
 <text x="${pad}" y="${heroY}" fill="url(#hero-fill)" font-size="80" font-weight="800"
       letter-spacing="-2.5" font-family="Segoe UI, system-ui, Arial, sans-serif">${escapeXml(style.label.toUpperCase())}</text>
 
 <!-- Exit pattern sub-label right under hero -->
-<text x="${pad + 4}" y="${heroY + 32}" fill="${accent}" font-size="15" font-weight="500"
+<text x="${pad + 4}" y="${heroY + 30}" fill="${accent}" font-size="14" font-weight="500"
       letter-spacing="0.5" font-family="Segoe UI, system-ui, Arial, sans-serif">${escapeXml(
         exit !== '—' ? `Exit style · ${exit}` : '—'
       )}</text>
 
-<!-- ── 4 STAT TILES ──────────────────────────────────────────────── -->
-${tile(tileX(0), tileTop, tileW, tileH, 'Win Rate', winRate, accent,
-  winTrades !== null && totalTrades !== null ? `${winTrades} / ${totalTrades} trades` : undefined)}
+<!-- ── PnL BLOCK — right of hero ─────────────────────────────────── -->
+<text x="${pnlBlockX}" y="${pnlBlockY + 22}" text-anchor="end"
+      fill="#3d5a78" font-size="11" font-weight="700" letter-spacing="2.5"
+      font-family="Segoe UI, system-ui, Arial, sans-serif">REALIZED PNL</text>
+<text x="${pnlBlockX}" y="${pnlBlockY + 75}" text-anchor="end"
+      fill="${pnl.color}" font-size="52" font-weight="800"
+      font-family="Segoe UI, system-ui, Arial, sans-serif">${escapeXml(pnl.text)}</text>
+${dataRange ? `<text x="${pnlBlockX}" y="${pnlBlockY + 100}" text-anchor="end"
+      fill="#5a7a9a" font-size="13" font-weight="600"
+      font-family="Segoe UI, system-ui, Arial, sans-serif">${escapeXml(dataRange)}</text>` : ''}
 
-${tile(tileX(1), tileTop, tileW, tileH, 'Median Hold', hold, accent)}
+<!-- ── 5 STAT TILES ──────────────────────────────────────────────── -->
+${tile(tileX(0), tileTop, tileW, tileH, 'Win Rate', winRate, accent)}
 
-${tile(tileX(2), tileTop, tileW, tileH, 'Realized PnL', pnl.text, pnl.color)}
+${tile(tileX(1), tileTop, tileW, tileH, 'Median Hold Time', hold, accent)}
 
-${tile(tileX(3), tileTop, tileW, tileH, 'Overall Holdings', overallHoldingsText, overallHoldingsColor)}
+${tile(tileX(2), tileTop, tileW, tileH, 'Tokens / Day', tokensPerDay, accent)}
+
+${tile(tileX(3), tileTop, tileW, tileH, 'Avg Tx Value', avgTxText, '#7a9ab8')}
+
+${tile(tileX(4), tileTop, tileW, tileH, 'Current Holdings', overallHoldingsText, overallHoldingsColor)}
 
 <!-- ── FLAG PILLS ────────────────────────────────────────────────── -->
 ${flagPill(pill1X, pillY, 'Bot', hud?.isBot ?? false, '#ff6b7a')}
@@ -270,6 +309,7 @@ ${flagPill(pill2X, pillY, 'Whale', hud?.isWhale ?? false, '#f5d86a')}
 <!-- Footer -->
 <text x="${pad}" y="${H - 26}" text-anchor="start" fill="#3d6080" font-size="13" font-weight="600"
       letter-spacing="0.3" font-family="Segoe UI, system-ui, Arial, sans-serif">sova-intel.com</text>
+
 <text x="${W - pad}" y="${H - 26}" text-anchor="end" fill="#2e4a62" font-size="12"
       font-family="Segoe UI, system-ui, Arial, sans-serif">Generated ${new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC')}</text>
 
